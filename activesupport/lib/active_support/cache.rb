@@ -88,10 +88,11 @@ module ActiveSupport
       private
         def retrieve_cache_key(key)
           case
-          when key.respond_to?(:cache_key) then key.cache_key
-          when key.is_a?(Array)            then key.map { |element| retrieve_cache_key(element) }.to_param
-          when key.respond_to?(:to_a)      then retrieve_cache_key(key.to_a)
-          else                                  key.to_param
+          when key.respond_to?(:cache_key_with_version) then key.cache_key_with_version
+          when key.respond_to?(:cache_key)              then key.cache_key
+          when key.is_a?(Array)                         then key.map { |element| retrieve_cache_key(element) }.to_param
+          when key.respond_to?(:to_a)                   then retrieve_cache_key(key.to_a)
+          else                                               key.to_param
           end.to_s
         end
 
@@ -330,11 +331,7 @@ module ActiveSupport
               payload[:hit] = false if payload
               nil
             elsif entry.mismatched?(version)
-              if payload
-                payload[:hit]      = false
-                payload[:mismatch] = "#{entry.version} != #{version}"
-              end
-
+              payload[:hit] = false if payload
               nil
             else
               payload[:hit] = true if payload
@@ -539,7 +536,6 @@ module ActiveSupport
           end
         end
 
-
         # Prefixes a key with the namespace. Namespace and key will be delimited
         # with a colon.
         def normalize_key(key, options)
@@ -589,7 +585,6 @@ module ActiveSupport
           payload.merge!(options) if options.is_a?(Hash)
           ActiveSupport::Notifications.instrument("cache_#{operation}.active_support", payload) { yield(payload) }
         end
-
 
         def log
           return unless logger && logger.debug? && !silence?
