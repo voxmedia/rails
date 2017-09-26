@@ -1,5 +1,8 @@
 # frozen_string_literal: true
 
+# This generates a deadlock per MySQL's documentation at
+# <https://dev.mysql.com/doc/refman/5.5/en/innodb-deadlock-example.html>
+
 require "cases/helper"
 require "support/connection_helper"
 require "byebug"
@@ -23,6 +26,7 @@ module ActiveRecord
         @connection.create_table("samples") do |t|
           t.integer "value"
         end
+        Sample.create!(:value => 1)
       end
 
       Sample.reset_column_information
@@ -106,17 +110,19 @@ module ActiveRecord
               sleep 0.5
 
               # Next query causes deadlock.
+              puts Thread.current.object_id.to_s.last(5) + "\t" + "current transaction state before DELETE: #{conn.transaction_manager.instance_variable_get(:@stack).first.instance_variable_get(:@state).instance_variable_get(:@state)}"
               conn.execute("DELETE FROM #{table_name} WHERE value=1")
 
               @mutexes[:sync_var].synchronize do
                 @past_deadlock += 1;
-                puts Thread.current.object_id.to_s.last(5) + "\t" + "SHARE MODE past_deadlock"
+                puts Thread.current.object_id.to_s.last(5) + "\t" + "SHARE MODE past_deadlock, current transaction state: #{conn.transaction_manager.instance_variable_get(:@stack).first.instance_variable_get(:@state).instance_variable_get(:@state)}"
               end
 
             rescue StandardError => e
               @mutexes[:sync_var].synchronize {
                 (exception_is_deadlock?(e) ?  @deadlocks : @unexpecteds) << e
               }
+              byebug
               raise e
             ensure
               @mutexes[:sync_thread].unlock if @mutexes[:sync_thread].locked?
@@ -138,17 +144,19 @@ module ActiveRecord
               # Next query goes into LOCK WAIT state until the above thread's
               # DELETE causes a deadlock which resolves them both.
               # <https://dev.mysql.com/doc/refman/5.5/en/innodb-trx-table.html>
+              puts Thread.current.object_id.to_s.last(5) + "\t" + "current transaction state before DELETE: #{conn.transaction_manager.instance_variable_get(:@stack).first.instance_variable_get(:@state).instance_variable_get(:@state)}"
               conn.execute("DELETE FROM #{table_name} WHERE value=1")
 
               @mutexes[:sync_var].synchronize do
                 @past_deadlock += 1
-                puts Thread.current.object_id.to_s.last(5) + "\t" + "SHARE MODE past_deadlock"
+                puts Thread.current.object_id.to_s.last(5) + "\t" + "SHARE MODE past_deadlock, current transaction state: #{conn.transaction_manager.instance_variable_get(:@stack).first.instance_variable_get(:@state).instance_variable_get(:@state)}"
               end
 
             rescue StandardError => e
               @mutexes[:sync_var].synchronize {
                 (exception_is_deadlock?(e) ?  @deadlocks : @unexpecteds) << e
               }
+              byebug
               raise e
             ensure
               @mutexes[:ok_proceed].unlock if @mutexes[:ok_proceed].locked?
@@ -160,8 +168,10 @@ module ActiveRecord
     end
 
     def exception_is_deadlock?(e)
-      e.is_a?(ActiveRecord::StatementInvalid) &&
-        /Deadlock found when trying to get lock; try restarting transaction/ =~ e.to_s
+      byebug
+      e.is_a?(ActiveRecord::Deadlocked) ||
+        ( e.is_a?(ActiveRecord::StatementInvalid) &&
+          /Deadlock found when trying to get lock; try restarting transaction/ =~ e.to_s )
     end
 
     class SQLPrinter
