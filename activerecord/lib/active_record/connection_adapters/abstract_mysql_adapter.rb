@@ -12,7 +12,6 @@ require_relative "mysql/schema_statements"
 require_relative "mysql/type_metadata"
 
 require "active_support/core_ext/string/strip"
-require "byebug"
 
 module ActiveRecord
   module ConnectionAdapters
@@ -659,7 +658,6 @@ module ActiveRecord
           when ER_NOT_NULL_VIOLATION, ER_DO_NOT_HAVE_DEFAULT
             NotNullViolation.new(message)
           when ER_LOCK_DEADLOCK
-            byebug
             Deadlocked.new(message)
           when ER_LOCK_WAIT_TIMEOUT
             TransactionTimeout.new(message)
