@@ -33,29 +33,43 @@ module ActiveRecord
       Thread.abort_on_exception = @abort
     end
 
-    test "raises Deadlocked when a deadlock is encountered" do
-      assert_raises(ActiveRecord::Deadlocked) do
-        barrier = Concurrent::CyclicBarrier.new(2)
+    test "rolls back with no exception after Deadlocked inside SavepointTransaction" do
+      barrier = Concurrent::CyclicBarrier.new(2)
+      s1 = Sample.create value: 1
+      s2 = Sample.create value: 2
 
-        s1 = Sample.create value: 1
-        s2 = Sample.create value: 2
-
+      begin
         thread = Thread.new do
-          Sample.transaction do
-            s1.lock!
-            barrier.wait
-            s2.update_attributes value: 1
+          # Start a RealTransaction
+          Sample.transaction(:requires_new => false) do
+            # Start a SavepointTransaction inside it
+            Sample.transaction(:requires_new => true) do
+              s1.lock!
+              barrier.wait
+              s2.update_attributes value: 1
+            end
           end
         end
 
         begin
-          Sample.transaction do
-            s2.lock!
-            barrier.wait
-            s1.update_attributes value: 2
+          # Start a RealTransaction
+          Sample.transaction(:requires_new => false) do
+            # Start a SavepointTransaction inside it
+            Sample.transaction(:requires_new => true) do
+              s2.lock!
+              barrier.wait
+              s1.update_attributes value: 2
+            end
           end
         ensure
           thread.join
+        end
+
+      rescue ActiveRecord::StatementInvalid => e
+        if /SAVEPOINT active_record_. does not exist: ROLLBACK TO SAVEPOINT/ =~ e.to_s
+          assert nil, 'ROLLBACK TO SAVEPOINT query issued for savepoint that no longer exists due to deadlock'
+        else
+          raise e
         end
       end
     end
