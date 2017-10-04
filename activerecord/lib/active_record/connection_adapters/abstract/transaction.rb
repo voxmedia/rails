@@ -230,7 +230,9 @@ module ActiveRecord
             yield
           rescue Exception => error
             if transaction
-              rollback_transaction
+              if !error.is_a?(ActiveRecord::TransactionRollbackError)
+                rollback_transaction
+              end
               after_failure_actions(transaction, error)
             end
             raise
